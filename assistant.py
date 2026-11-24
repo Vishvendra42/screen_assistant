@@ -970,6 +970,9 @@ alpha_val_lbl = tk.Label(slider_box, text=f"{int(current_alpha * 100)}%", font=(
                          bg=PANEL, fg=MUTED, width=4)
 alpha_val_lbl.pack(side=tk.LEFT)
 
+lang_lbl = tk.Label(header, text="C++ (Optimal)", font=(UI_FONT, 8, "bold"), bg=FIELD, fg=MUTED, padx=6, pady=2)
+lang_lbl.pack(side=tk.LEFT, padx=(8, 0))
+
 
 def make_link(text, command):
     lbl = tk.Label(header, text=text, font=(UI_FONT, 10), bg=PANEL, fg=MUTED, cursor="hand2", padx=6)
@@ -1016,46 +1019,64 @@ make_link("Clear", clear_chat)
 make_link("Copy Code", copy_code)
 make_link("Captures", open_captures_folder)
 
-# Quick Action Bar
+# Quick Action Bar (Decent, sleek, polished cards)
 action_bar = tk.Frame(main, bg=PANEL)
 action_bar.pack(fill=tk.X, pady=(0, 6))
 
+BTN_BG = "#242428"
+BTN_HOVER = "#34343a"
+
 
 def make_action_btn(text, cmd, color=ACCENT):
-    lbl = tk.Label(action_bar, text=text, font=(UI_FONT, 9, "bold"), bg=FIELD, fg=color,
-                   cursor="hand2", padx=8, pady=3)
-    lbl.pack(side=tk.LEFT, padx=(0, 6))
+    lbl = tk.Label(
+        action_bar, text=text, font=(UI_FONT, 9, "bold"),
+        bg=BTN_BG, fg=color, cursor="hand2", padx=9, pady=3,
+        relief=tk.FLAT
+    )
+    lbl.pack(side=tk.LEFT, padx=(0, 5))
     lbl.bind("<Button-1>", lambda _e: cmd())
+    lbl.bind("<Enter>", lambda _e: lbl.config(bg=BTN_HOVER))
+    lbl.bind("<Leave>", lambda _e: lbl.config(bg=BTN_BG))
     return lbl
 
 
-make_action_btn("Solve Screen  (/+S / F9)", lambda: solve_screen_action(), ACCENT)
-make_action_btn("Append  (/+D / F11)", lambda: append_page_action(), "#ff9f0a")
+make_action_btn("Solve  (F9 / /+S)", lambda: solve_screen_action(), ACCENT)
+make_action_btn("Append  (F11 / /+D)", lambda: append_page_action(), "#ff9f0a")
 make_action_btn("Clip  (/+C)", lambda: solve_clip_action(), SUCCESS)
 
-lang_lbl = tk.Label(action_bar, text="C++ (Optimal)", font=(UI_FONT, 9, "bold"), bg=FIELD, fg=MUTED, padx=6, pady=3)
-lang_lbl.pack(side=tk.RIGHT)
+
+def auto_type_action():
+    set_status("Auto Type: ready (placeholder)")
+    root.after(2000, lambda: set_status(""))
+
+
+auto_type_btn = make_action_btn("Auto Type", lambda: auto_type_action(), "#bf5af2")
 
 
 def toggle_ai_mode():
     global CURRENT_MODE
     if CURRENT_MODE == "hybrid":
         CURRENT_MODE = "gemini"
-        mode_btn.config(text="Mode: Gemini 3.8", fg="#30d158")
+        mode_btn.config(text="Mode: Gemini  (F12 / /+M)", fg="#30d158")
         set_status("Switched to Google Gemini 3.8 Mode")
     else:
         CURRENT_MODE = "hybrid"
-        mode_btn.config(text="Mode: Hybrid (Groq 120B)", fg=ACCENT)
+        mode_btn.config(text="Mode: Hybrid  (F12 / /+M)", fg=ACCENT)
         set_status("Switched to Fast Hybrid Mode (Qwen Vision + GPT-OSS 120B)")
     root.after(2000, lambda: set_status(""))
 
 
-init_text = "Mode: Hybrid (Groq 120B)" if CURRENT_MODE == "hybrid" else "Mode: Gemini 3.8"
+init_text = "Mode: Hybrid  (F12 / /+M)" if CURRENT_MODE == "hybrid" else "Mode: Gemini  (F12 / /+M)"
 init_color = ACCENT if CURRENT_MODE == "hybrid" else "#30d158"
-mode_btn = tk.Label(action_bar, text=init_text, font=(UI_FONT, 9, "bold"), bg=FIELD, fg=init_color,
-                    cursor="hand2", padx=8, pady=3)
-mode_btn.pack(side=tk.RIGHT, padx=(0, 8))
+mode_btn = tk.Label(
+    action_bar, text=init_text, font=(UI_FONT, 9, "bold"),
+    bg=BTN_BG, fg=init_color, cursor="hand2", padx=9, pady=3,
+    relief=tk.FLAT
+)
+mode_btn.pack(side=tk.RIGHT, padx=(0, 0))
 mode_btn.bind("<Button-1>", lambda _e: toggle_ai_mode())
+mode_btn.bind("<Enter>", lambda _e: mode_btn.config(bg=BTN_HOVER))
+mode_btn.bind("<Leave>", lambda _e: mode_btn.config(bg=BTN_BG))
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Output Text Display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 output_frame = tk.Frame(main, bg=PANEL)
@@ -1534,6 +1555,8 @@ def _low_level_keyboard_proc(nCode, wParam, lParam):
                 action = "clip"
             elif vk in (ord('M'), ord('m'), ord('X'), ord('x')):  # / + M (or / + X) -> toggle AI mode
                 action = "mode"
+            elif vk in (ord('T'), ord('t')):    # / + T -> auto type
+                action = "autotype"
             elif vk in (ord('Q'), ord('q')):    # / + Q -> quit
                 action = "quit"
             elif vk == 0x31:                     # / + 1 -> show / bring to front
@@ -1583,6 +1606,8 @@ def poll_hotkey_queue():
                 append_page_action(fg)
             elif action == "mode":
                 toggle_ai_mode()
+            elif action == "autotype":
+                auto_type_action()
     except queue.Empty:
         pass
     root.after(50, poll_hotkey_queue)
@@ -1638,12 +1663,13 @@ threading.Thread(target=hotkey_thread, daemon=True).start()
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 8. Launch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 write(
-    "Screen Assistant Ready  [Vision AI: Gemini 3.8 / Hybrid]\n"
+    "Screen Assistant Ready  [Vision AI: Hybrid / Gemini]\n"
     "  F9  / +S  ->  Solve screen question\n"
     "  F10 / +Z  ->  Toggle show / hide\n"
     "  F11 / +D  ->  Append next page\n"
-    "  F12 / +M  ->  Switch AI mode\n"
+    "  F12 / +M  ->  Switch AI mode (Hybrid 120B <-> Gemini 3.8)\n"
     "  /+C        ->  Solve clipboard text\n"
+    "  /+T        ->  Auto Type (placeholder)\n"
     "  /+1        ->  Show overlay\n"
     "  /+Q        ->  Quit\n\n",
     "meta",
