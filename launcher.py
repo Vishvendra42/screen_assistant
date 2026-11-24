@@ -69,6 +69,7 @@ VK_RWIN    = 0x5C
 _slash_down       = False
 _slash_count      = 0
 _slash_time       = 0.0
+_slash_released_time = 0.0
 _swallow_slash_up = False
 _blocked_keys     = set()
 _hhook            = None
@@ -89,7 +90,7 @@ def _launch_main():
 
 
 def _keyboard_proc(nCode, wParam, lParam):
-    global _slash_down, _slash_count, _slash_time, _swallow_slash_up, _blocked_keys
+    global _slash_down, _slash_count, _slash_time, _slash_released_time, _swallow_slash_up, _blocked_keys
     if nCode >= 0:
         kbd = KBDLLHOOKSTRUCT.from_address(lParam)
 
@@ -101,8 +102,7 @@ def _keyboard_proc(nCode, wParam, lParam):
         is_down = wParam in (0x0100, 0x0104)
         is_up   = wParam in (0x0101, 0x0105)
 
-        # If Ctrl, Alt, or Win is pressed, this is an IDE/system shortcut (e.g. Ctrl + / in VS Code, Ctrl + 1, etc.).
-        # Screen Assistant shortcuts NEVER use Ctrl/Alt/Win. Pass through immediately and clean up chord state.
+        # If Ctrl, Alt, or Win is pressed, pass through immediately and cancel chord state.
         is_modifier_active = (
             (user32.GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 or
             (user32.GetAsyncKeyState(VK_MENU) & 0x8000) != 0 or
@@ -112,48 +112,42 @@ def _keyboard_proc(nCode, wParam, lParam):
         if is_modifier_active:
             _slash_down = False
             _slash_count = 0
+            _slash_released_time = 0.0
             _swallow_slash_up = False
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-        is_slash_physically_down = (
-            ((user32.GetAsyncKeyState(VK_SLASH) & 0x8000) != 0) or
-            ((user32.GetAsyncKeyState(VK_DIVIDE) & 0x8000) != 0)
-        )
-
         if vk in (VK_SLASH, VK_DIVIDE):
             if is_down:
-                if not _slash_down:
-                    _slash_down = True
-                    _slash_count = 1
-                    _slash_time = time.time()
-                else:
-                    _slash_count += 1
+                _slash_down = True
+                _slash_count += 1
+                _slash_time = time.time()
+                _slash_released_time = 0.0
             elif is_up:
                 _slash_down = False
-                _slash_count = 0
+                _slash_released_time = time.time()
                 if _swallow_slash_up:
                     _swallow_slash_up = False
                     return 1  # swallow slash keyup after chord triggered
 
         elif is_down:
             now = time.time()
-            is_recent_slash = _slash_down and ((now - _slash_time) <= 1.5)
-            is_active_chord = is_slash_physically_down or is_recent_slash
+            is_active_chord = _slash_down or (0 < (now - _slash_released_time) <= 0.7)
+
+            chord_slash_count = _slash_count
+            _slash_down = False
+            _slash_released_time = 0.0
+            _slash_count = 0
 
             if not is_active_chord:
-                _slash_down = False
-                _slash_count = 0
                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
             # WDALauncher ONLY handles / + 1 to launch/show the main app. Never intercept other keys!
             if vk == 0x31:  # '1' key
                 _blocked_keys.add(vk)
                 _swallow_slash_up = True
-                _slash_down = False
-                for _ in range(max(1, _slash_count)):
+                for _ in range(max(1, chord_slash_count)):
                     user32.keybd_event(0x08, 0, 0, 0)
                     user32.keybd_event(0x08, 0, 2, 0)
-                _slash_count = 0
                 threading.Thread(target=_launch_main, daemon=True).start()
                 return 1  # block '1' from typing
 
