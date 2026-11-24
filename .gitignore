@@ -1,0 +1,42 @@
+﻿# Python virtual environments & bytecode
+.venv/
+env/
+venv/
+__pycache__/
+*.py[cod]
+*.class
+
+# Secrets & Environment variables (CRITICAL)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Build artifacts & binaries
+build/
+dist/
+*.spec.bak
+*.exe
+*.dll
+
+# Logs & temp runtime files
+*.log
+.assistant.log
+.assistant.pid
+.drv.log
+.drv.pid
+launcher_debug.log
+
+# Captures & test sessions (screenshots & session JSONs)
+captures/
+debug_last_capture.png
+debug_last_ocr.txt
+debug_last_prompt.txt
+debug_last_session.json
+
+# IDE / OS files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
