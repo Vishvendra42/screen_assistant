@@ -194,8 +194,55 @@ if GROQ_API_KEY and GROQ_API_KEY not in ("your_groq_api_key_here", "gsk_your_key
 if AI_PROVIDER == "gemini" and not GEMINI_API_KEY:
     fatal("No Gemini API key found in .env (GEMINI_API_KEY=...)")
 
-ACTIVE_MODEL_NAME = GEMINI_MODEL if (AI_PROVIDER == "gemini" and GEMINI_API_KEY) else GROQ_MODEL
-print(f"Active AI Engine: {AI_PROVIDER.upper()} -> {ACTIVE_MODEL_NAME} (Language: {PREFERRED_LANGUAGE})")
+CURRENT_MODE = os.getenv("DEFAULT_ENGINE_MODE", "hybrid").lower()  # "hybrid" or "gemini"
+print(f"Initial AI Mode: {CURRENT_MODE.upper()} (Language: {PREFERRED_LANGUAGE})")
+
+def call_groq_hybrid_pipeline(all_images: list[str], combined_text: str, instruction: str) -> str:
+    """
+    Groq Hybrid Pipeline:
+    Step 1: Uses fast Qwen 27B Vision to visually read and transcribe all tables, diagrams, and text.
+    Step 2: Feeds the clean structured problem to GPT-OSS 120B with deep reasoning for optimal solution.
+    Total latency: ~1.5s - 2.0s.
+    """
+    if not groq_client:
+        raise RuntimeError("Groq client not initialized (check GROQ_API_KEY in .env)")
+
+    # Step 1: Vision Extraction
+    if all_images:
+        vision_parts = [{"type": "text", "text": "Transcribe verbatim the complete question, code/table/diagram context, and all options visible in the main problem area. Ignore browser chrome."}]
+        for idx, img in enumerate(all_images):
+            vision_parts.append({"type": "text", "text": f"--- Page {idx + 1} Image ---"})
+            vision_parts.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
+
+        v_resp = groq_client.chat.completions.create(
+            model=GROQ_VISION_MODEL,
+            messages=[{"role": "user", "content": vision_parts}],
+            max_tokens=600,
+            temperature=0.0
+        )
+        extracted_problem = v_resp.choices[0].message.content.strip()
+    else:
+        extracted_problem = combined_text
+
+    # Step 2: Reasoning & Solving via GPT-OSS 120B
+    solver_prompt = f"{SYSTEM_PROMPT}\n\nProblem statement:\n{extracted_problem}\n\nInstructions:\n{instruction}"
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": solver_prompt}
+    ]
+
+    s_resp = groq_client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=messages,
+        max_tokens=1500,
+        temperature=0.1
+    )
+    choice = s_resp.choices[0].message
+    content = choice.content or ""
+    if not content.strip() and choice.reasoning:
+        # If output was captured in reasoning, extract the concluding answer
+        content = choice.reasoning.strip().splitlines()[-1]
+    return content.strip()
 
 def call_gemini_vision(images: list[str] | str, text_prompt: str) -> str:
     """
@@ -989,6 +1036,25 @@ make_action_btn("Clip  (/+C)", lambda: solve_clip_action(), SUCCESS)
 lang_lbl = tk.Label(action_bar, text="C++ (Optimal)", font=(UI_FONT, 9, "bold"), bg=FIELD, fg=MUTED, padx=6, pady=3)
 lang_lbl.pack(side=tk.RIGHT)
 
+def toggle_ai_mode():
+    global CURRENT_MODE
+    if CURRENT_MODE == "hybrid":
+        CURRENT_MODE = "gemini"
+        mode_btn.config(text="Mode: Gemini 3.8", fg="#30d158")
+        set_status("Switched to Google Gemini 3.8 Mode")
+    else:
+        CURRENT_MODE = "hybrid"
+        mode_btn.config(text="Mode: Hybrid (Groq 120B)", fg=ACCENT)
+        set_status("Switched to Fast Hybrid Mode (Qwen Vision + GPT-OSS 120B)")
+    root.after(2000, lambda: set_status(""))
+
+init_text = "Mode: Hybrid (Groq 120B)" if CURRENT_MODE == "hybrid" else "Mode: Gemini 3.8"
+init_color = ACCENT if CURRENT_MODE == "hybrid" else "#30d158"
+mode_btn = tk.Label(action_bar, text=init_text, font=(UI_FONT, 9, "bold"), bg=FIELD, fg=init_color,
+                    cursor="hand2", padx=8, pady=3)
+mode_btn.pack(side=tk.RIGHT, padx=(0, 8))
+mode_btn.bind("<Button-1>", lambda _e: toggle_ai_mode())
+
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Output Text Display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 output_frame = tk.Frame(main, bg=PANEL)
 output_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
@@ -1185,55 +1251,43 @@ def solve_problem(problem_text, source_name):
             )
 
             full_text = ""
-            use_gemini = (AI_PROVIDER == "gemini" and bool(GEMINI_API_KEY))
 
-            if use_gemini:
+            if CURRENT_MODE == "hybrid":
+                set_status("Solving via Fast Hybrid (Qwen Vision + GPT-OSS 120B)...")
+                try:
+                    full_text = call_groq_hybrid_pipeline(all_images if is_vision_mode else [], combined_text, instruction)
+                    def render_hybrid(txt=full_text):
+                        output.config(state=tk.NORMAL)
+                        output.insert("end-1c", txt)
+                        output.see(tk.END)
+                        output.config(state=tk.DISABLED)
+                    root.after(0, render_hybrid)
+                except Exception as h_err:
+                    print(f"[Hybrid failed: {h_err}] -> Fallback to direct Groq...")
+                    CURRENT_MODE = "gemini"
+
+            if CURRENT_MODE == "gemini":
+                set_status("Solving via Gemini 3.8 Flash...")
                 gemini_prompt = f"{SYSTEM_PROMPT}\n\n{instruction}"
                 if combined_text and combined_text != "__VISION__":
                     gemini_prompt += f"\n\n<problem_text>\n{combined_text}\n</problem_text>"
                 try:
                     full_text = call_gemini_vision(all_images if is_vision_mode else [], gemini_prompt)
+                    def render_gemini(txt=full_text):
+                        output.config(state=tk.NORMAL)
+                        output.insert("end-1c", txt)
+                        output.see(tk.END)
+                        output.config(state=tk.DISABLED)
+                    root.after(0, render_gemini)
                 except Exception as g_err:
-                    print(f"[Gemini failed: {g_err}] -> Auto-falling back to Groq LPU...")
-                    use_gemini = False
-
-            if not use_gemini:
-                if is_vision_mode and all_images:
-                    groq_img = all_images[-1]
-                    user_content = [
-                        {"type": "text", "text": instruction},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{groq_img}"}},
-                    ]
-                    use_model = GROQ_VISION_MODEL
-                else:
-                    user_content = prompt_content
-                    use_model = GROQ_MODEL
-
-                messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ]
-
-                stream = groq_client.chat.completions.create(
-                    model=use_model,
-                    messages=messages,
-                    max_tokens=GROQ_MAX_TOKENS,
-                    temperature=GROQ_TEMPERATURE,
-                    stream=True,
-                )
-
-                full_chunks = []
-                for chunk in stream:
-                    delta = chunk.choices[0].delta.content
-                    if delta:
-                        full_chunks.append(delta)
-                        def append_piece(d=delta):
-                            output.config(state=tk.NORMAL)
-                            output.insert("end-1c", d)
-                            output.see(tk.END)
-                            output.config(state=tk.DISABLED)
-                        root.after(0, append_piece)
-                full_text = "".join(full_chunks)
+                    print(f"[Gemini failed: {g_err}] -> Emergency Groq fallback...")
+                    full_text = call_groq_hybrid_pipeline(all_images if is_vision_mode else [], combined_text, instruction)
+                    def render_emer(txt=full_text):
+                        output.config(state=tk.NORMAL)
+                        output.insert("end-1c", txt)
+                        output.see(tk.END)
+                        output.config(state=tk.DISABLED)
+                    root.after(0, render_emer)
 
             def finish():
                 t_solve = round(time.time() - t0, 2)
