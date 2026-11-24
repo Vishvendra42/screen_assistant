@@ -785,7 +785,7 @@ def S(v):
     return int(round(v * SC))
 
 
-W, H = S(640), S(460)
+W, H = S(480), S(290)
 root.overrideredirect(True)
 
 # Place in the left bottom corner with lower line touching the bottom of the screen
@@ -797,7 +797,7 @@ pos_x = 0
 pos_y = max(0, bottom_y - H)
 
 root.geometry(f"{W}x{H}+{pos_x}+{pos_y}")
-root.minsize(S(400), S(300))
+root.minsize(S(360), S(200))
 root.attributes("-topmost", True)
 TARGET_ALPHA = 0.85
 current_alpha = 0.0
@@ -895,7 +895,7 @@ def setup_overlay():
 bg = tk.Canvas(root, bg=KEY_COLOR, highlightthickness=0, bd=0)
 bg.pack(fill=tk.BOTH, expand=True)
 
-PAD_X, PAD_TOP, PAD_BOTTOM = S(18), S(24), S(18)
+PAD_X, PAD_TOP, PAD_BOTTOM = S(10), S(12), S(10)
 main = tk.Frame(bg, bg=PANEL)
 inner_id = bg.create_window(PAD_X, PAD_TOP, anchor="nw", window=main)
 
@@ -1013,47 +1013,41 @@ def open_captures_folder():
 
 make_link("X", hide_window)
 make_link("Clear", clear_chat)
-make_link("Copy Code", copy_code)
-make_link("Captures", open_captures_folder)
-
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Quick Action Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-action_bar = tk.Frame(main, bg=PANEL)
-action_bar.pack(fill=tk.X, pady=(0, 6))
-
-
-def make_action_btn(text, cmd, color=ACCENT):
-    lbl = tk.Label(action_bar, text=text, font=(UI_FONT, 9, "bold"), bg=FIELD, fg=color,
-                   cursor="hand2", padx=8, pady=3)
-    lbl.pack(side=tk.LEFT, padx=(0, 6))
-    lbl.bind("<Button-1>", lambda _e: cmd())
-    return lbl
-
-
-make_action_btn("Solve Screen  (/+S / F9)", lambda: solve_screen_action(), ACCENT)
-make_action_btn("Append  (/+D / F11)", lambda: append_page_action(), "#ff9f0a")
-make_action_btn("Clip  (/+C)", lambda: solve_clip_action(), SUCCESS)
-
-lang_lbl = tk.Label(action_bar, text="C++ (Optimal)", font=(UI_FONT, 9, "bold"), bg=FIELD, fg=MUTED, padx=6, pady=3)
-lang_lbl.pack(side=tk.RIGHT)
+make_link("Copy", copy_code)
 
 def toggle_ai_mode():
     global CURRENT_MODE
     if CURRENT_MODE == "hybrid":
         CURRENT_MODE = "gemini"
-        mode_btn.config(text="Mode: Gemini 3.8", fg="#30d158")
-        set_status("Switched to Google Gemini 3.8 Mode")
+        mode_btn.config(text="Gemini 3.8 (F12)", fg="#30d158")
+        set_status("Mode: Google Gemini 3.8")
     else:
         CURRENT_MODE = "hybrid"
-        mode_btn.config(text="Mode: Hybrid (Groq 120B)", fg=ACCENT)
-        set_status("Switched to Fast Hybrid Mode (Qwen Vision + GPT-OSS 120B)")
-    root.after(2000, lambda: set_status(""))
+        mode_btn.config(text="Hybrid 120B (F12)", fg=ACCENT)
+        set_status("Mode: Fast Hybrid (Qwen Vision + 120B)")
+    root.after(1600, lambda: set_status(""))
 
-init_text = "Mode: Hybrid (Groq 120B)" if CURRENT_MODE == "hybrid" else "Mode: Gemini 3.8"
+init_text = "Hybrid 120B (F12)" if CURRENT_MODE == "hybrid" else "Gemini 3.8 (F12)"
 init_color = ACCENT if CURRENT_MODE == "hybrid" else "#30d158"
-mode_btn = tk.Label(action_bar, text=init_text, font=(UI_FONT, 9, "bold"), bg=FIELD, fg=init_color,
-                    cursor="hand2", padx=8, pady=3)
-mode_btn.pack(side=tk.RIGHT, padx=(0, 8))
+mode_btn = tk.Label(header, text=init_text, font=(UI_FONT, 8, "bold"), bg=FIELD, fg=init_color,
+                    cursor="hand2", padx=6, pady=2)
+mode_btn.pack(side=tk.RIGHT, padx=(0, 6))
 mode_btn.bind("<Button-1>", lambda _e: toggle_ai_mode())
+
+# Action Bar
+action_bar = tk.Frame(main, bg=PANEL)
+action_bar.pack(fill=tk.X, pady=(0, 4))
+
+def make_action_btn(text, cmd, color=ACCENT):
+    lbl = tk.Label(action_bar, text=text, font=(UI_FONT, 8, "bold"), bg=FIELD, fg=color,
+                   cursor="hand2", padx=6, pady=2)
+    lbl.pack(side=tk.LEFT, padx=(0, 4))
+    lbl.bind("<Button-1>", lambda _e: cmd())
+    return lbl
+
+make_action_btn("Solve (F9)", lambda: solve_screen_action(), ACCENT)
+make_action_btn("Append (F11)", lambda: append_page_action(), "#ff9f0a")
+make_action_btn("Clip (/+C)", lambda: solve_clip_action(), SUCCESS)
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Output Text Display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 output_frame = tk.Frame(main, bg=PANEL)
@@ -1109,8 +1103,8 @@ def start_resize(e):
 
 
 def do_resize(e):
-    nw = max(S(440), resize_data["w"] + (e.x_root - resize_data["x"]))
-    nh = max(S(360), resize_data["h"] + (e.y_root - resize_data["y"]))
+    nw = max(S(360), resize_data["w"] + (e.x_root - resize_data["x"]))
+    nh = max(S(200), resize_data["h"] + (e.y_root - resize_data["y"]))
     root.geometry(f"{nw}x{nh}")
 
 
@@ -1428,11 +1422,12 @@ root.bind("<Escape>", lambda _e: hide_window())
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 7. Global Hotkeys (Win32) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 hotkey_queue = queue.Queue()
 WM_HOTKEY, MOD_NOREPEAT = 0x0312, 0x4000
-HK_TOGGLE, HK_QUIT, HK_SCREEN, HK_CLIP, HK_APPEND = 1, 2, 3, 4, 5
+HK_TOGGLE, HK_QUIT, HK_SCREEN, HK_CLIP, HK_APPEND, HK_MODE = 1, 2, 3, 4, 5, 6
 
 VK_F9  = 0x78  # Solve screen
 VK_F10 = 0x79  # Toggle overlay
 VK_F11 = 0x7A  # Append page
+VK_F12 = 0x7B  # Switch AI mode
 
 ULONG_PTR = ctypes.c_size_t
 
@@ -1529,6 +1524,8 @@ def _low_level_keyboard_proc(nCode, wParam, lParam):
                 action = "append"
             elif vk in (ord('C'), ord('c')):    # / + C -> clip
                 action = "clip"
+            elif vk in (ord('M'), ord('m'), ord('X'), ord('x')):  # / + M (or / + X) -> toggle AI mode
+                action = "mode"
             elif vk in (ord('Q'), ord('q')):    # / + Q -> quit
                 action = "quit"
             elif vk == 0x31:                     # / + 1 -> show / bring to front
@@ -1576,6 +1573,8 @@ def poll_hotkey_queue():
                 solve_clip_action()
             elif action == "append":
                 append_page_action(fg)
+            elif action == "mode":
+                toggle_ai_mode()
     except queue.Empty:
         pass
     root.after(50, poll_hotkey_queue)
@@ -1600,6 +1599,7 @@ def hotkey_thread():
     ok_s = user32.RegisterHotKey(None, HK_SCREEN, MOD_NOREPEAT, VK_F9)
     ok_z = user32.RegisterHotKey(None, HK_TOGGLE, MOD_NOREPEAT, VK_F10)
     ok_d = user32.RegisterHotKey(None, HK_APPEND, MOD_NOREPEAT, VK_F11)
+    ok_m = user32.RegisterHotKey(None, HK_MODE, MOD_NOREPEAT, VK_F12)
 
     print(f"Hotkeys active: /+S/F9 ({bool(ok_s)}) | /+Z/F10 ({bool(ok_z)}) | /+D/F11 ({bool(ok_d)}) | /+C | /+Q (Zero Ctrl/Alt)")
 
@@ -1617,6 +1617,8 @@ def hotkey_thread():
                 hotkey_queue.put(("clip", fg))
             elif msg.wParam == HK_APPEND:
                 hotkey_queue.put(("append", fg))
+            elif msg.wParam == HK_MODE:
+                hotkey_queue.put(("mode", fg))
         user32.TranslateMessage(ctypes.byref(msg))
         user32.DispatchMessageW(ctypes.byref(msg))
 
@@ -1628,13 +1630,12 @@ threading.Thread(target=hotkey_thread, daemon=True).start()
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 8. Launch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 write(
-    "Screen Assistant Ready  [Vision AI: Gemini 3.8 Flash]\n"
-    "  F9  / +S  ->  Solve screen question\n"
-    "  F10 / +Z  ->  Toggle show / hide\n"
-    "  F11 / +D  ->  Append next page\n"
-    "  /+C        ->  Solve clipboard text\n"
-    "  /+1        ->  Show overlay\n"
-    "  /+Q        ->  Quit\n\n",
+    "Screen Assistant Ready (Compact)\n"
+    "  F9  / +S  ->  Solve\n"
+    "  F10 / +Z  ->  Show / Hide\n"
+    "  F11 / +D  ->  Append Page\n"
+    "  F12 / +M  ->  Switch Mode (Hybrid <-> Gemini)\n"
+    "  /+C        ->  Clip\n\n",
     "meta",
 )
 
