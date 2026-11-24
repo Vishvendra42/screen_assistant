@@ -785,7 +785,7 @@ def S(v):
     return int(round(v * SC))
 
 
-W, H = S(480), S(290)
+W, H = S(640), S(460)
 root.overrideredirect(True)
 
 # Place in the left bottom corner with lower line touching the bottom of the screen
@@ -797,7 +797,7 @@ pos_x = 0
 pos_y = max(0, bottom_y - H)
 
 root.geometry(f"{W}x{H}+{pos_x}+{pos_y}")
-root.minsize(S(360), S(200))
+root.minsize(S(400), S(300))
 root.attributes("-topmost", True)
 TARGET_ALPHA = 0.85
 current_alpha = 0.0
@@ -895,7 +895,7 @@ def setup_overlay():
 bg = tk.Canvas(root, bg=KEY_COLOR, highlightthickness=0, bd=0)
 bg.pack(fill=tk.BOTH, expand=True)
 
-PAD_X, PAD_TOP, PAD_BOTTOM = S(10), S(12), S(10)
+PAD_X, PAD_TOP, PAD_BOTTOM = S(18), S(24), S(18)
 main = tk.Frame(bg, bg=PANEL)
 inner_id = bg.create_window(PAD_X, PAD_TOP, anchor="nw", window=main)
 
@@ -1013,41 +1013,49 @@ def open_captures_folder():
 
 make_link("X", hide_window)
 make_link("Clear", clear_chat)
-make_link("Copy", copy_code)
+make_link("Copy Code", copy_code)
+make_link("Captures", open_captures_folder)
+
+# Quick Action Bar
+action_bar = tk.Frame(main, bg=PANEL)
+action_bar.pack(fill=tk.X, pady=(0, 6))
+
+
+def make_action_btn(text, cmd, color=ACCENT):
+    lbl = tk.Label(action_bar, text=text, font=(UI_FONT, 9, "bold"), bg=FIELD, fg=color,
+                   cursor="hand2", padx=8, pady=3)
+    lbl.pack(side=tk.LEFT, padx=(0, 6))
+    lbl.bind("<Button-1>", lambda _e: cmd())
+    return lbl
+
+
+make_action_btn("Solve Screen  (/+S / F9)", lambda: solve_screen_action(), ACCENT)
+make_action_btn("Append  (/+D / F11)", lambda: append_page_action(), "#ff9f0a")
+make_action_btn("Clip  (/+C)", lambda: solve_clip_action(), SUCCESS)
+
+lang_lbl = tk.Label(action_bar, text="C++ (Optimal)", font=(UI_FONT, 9, "bold"), bg=FIELD, fg=MUTED, padx=6, pady=3)
+lang_lbl.pack(side=tk.RIGHT)
+
 
 def toggle_ai_mode():
     global CURRENT_MODE
     if CURRENT_MODE == "hybrid":
         CURRENT_MODE = "gemini"
-        mode_btn.config(text="Gemini 3.8 (F12)", fg="#30d158")
-        set_status("Mode: Google Gemini 3.8")
+        mode_btn.config(text="Mode: Gemini 3.8", fg="#30d158")
+        set_status("Switched to Google Gemini 3.8 Mode")
     else:
         CURRENT_MODE = "hybrid"
-        mode_btn.config(text="Hybrid 120B (F12)", fg=ACCENT)
-        set_status("Mode: Fast Hybrid (Qwen Vision + 120B)")
-    root.after(1600, lambda: set_status(""))
+        mode_btn.config(text="Mode: Hybrid (Groq 120B)", fg=ACCENT)
+        set_status("Switched to Fast Hybrid Mode (Qwen Vision + GPT-OSS 120B)")
+    root.after(2000, lambda: set_status(""))
 
-init_text = "Hybrid 120B (F12)" if CURRENT_MODE == "hybrid" else "Gemini 3.8 (F12)"
+
+init_text = "Mode: Hybrid (Groq 120B)" if CURRENT_MODE == "hybrid" else "Mode: Gemini 3.8"
 init_color = ACCENT if CURRENT_MODE == "hybrid" else "#30d158"
-mode_btn = tk.Label(header, text=init_text, font=(UI_FONT, 8, "bold"), bg=FIELD, fg=init_color,
-                    cursor="hand2", padx=6, pady=2)
-mode_btn.pack(side=tk.RIGHT, padx=(0, 6))
+mode_btn = tk.Label(action_bar, text=init_text, font=(UI_FONT, 9, "bold"), bg=FIELD, fg=init_color,
+                    cursor="hand2", padx=8, pady=3)
+mode_btn.pack(side=tk.RIGHT, padx=(0, 8))
 mode_btn.bind("<Button-1>", lambda _e: toggle_ai_mode())
-
-# Action Bar
-action_bar = tk.Frame(main, bg=PANEL)
-action_bar.pack(fill=tk.X, pady=(0, 4))
-
-def make_action_btn(text, cmd, color=ACCENT):
-    lbl = tk.Label(action_bar, text=text, font=(UI_FONT, 8, "bold"), bg=FIELD, fg=color,
-                   cursor="hand2", padx=6, pady=2)
-    lbl.pack(side=tk.LEFT, padx=(0, 4))
-    lbl.bind("<Button-1>", lambda _e: cmd())
-    return lbl
-
-make_action_btn("Solve (F9)", lambda: solve_screen_action(), ACCENT)
-make_action_btn("Append (F11)", lambda: append_page_action(), "#ff9f0a")
-make_action_btn("Clip (/+C)", lambda: solve_clip_action(), SUCCESS)
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Output Text Display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 output_frame = tk.Frame(main, bg=PANEL)
@@ -1103,8 +1111,8 @@ def start_resize(e):
 
 
 def do_resize(e):
-    nw = max(S(360), resize_data["w"] + (e.x_root - resize_data["x"]))
-    nh = max(S(200), resize_data["h"] + (e.y_root - resize_data["y"]))
+    nw = max(S(440), resize_data["w"] + (e.x_root - resize_data["x"]))
+    nh = max(S(360), resize_data["h"] + (e.y_root - resize_data["y"]))
     root.geometry(f"{nw}x{nh}")
 
 
@@ -1630,12 +1638,14 @@ threading.Thread(target=hotkey_thread, daemon=True).start()
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ 8. Launch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 write(
-    "Screen Assistant Ready (Compact)\n"
-    "  F9  / +S  ->  Solve\n"
-    "  F10 / +Z  ->  Show / Hide\n"
-    "  F11 / +D  ->  Append Page\n"
-    "  F12 / +M  ->  Switch Mode (Hybrid <-> Gemini)\n"
-    "  /+C        ->  Clip\n\n",
+    "Screen Assistant Ready  [Vision AI: Gemini 3.8 / Hybrid]\n"
+    "  F9  / +S  ->  Solve screen question\n"
+    "  F10 / +Z  ->  Toggle show / hide\n"
+    "  F11 / +D  ->  Append next page\n"
+    "  F12 / +M  ->  Switch AI mode\n"
+    "  /+C        ->  Solve clipboard text\n"
+    "  /+1        ->  Show overlay\n"
+    "  /+Q        ->  Quit\n\n",
     "meta",
 )
 
