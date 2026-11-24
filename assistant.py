@@ -1198,6 +1198,7 @@ def solve_problem(problem_text, source_name):
     set_status(f"Solving via {GROQ_MODEL}â€¦")
 
     def worker():
+        global CURRENT_MODE
         try:
             t0 = time.time()
             solve_ts = time.strftime("%Y%m%d_%H%M%S")
@@ -1252,42 +1253,32 @@ def solve_problem(problem_text, source_name):
 
             full_text = ""
 
-            if CURRENT_MODE == "hybrid":
+            mode_to_use = CURRENT_MODE
+            if mode_to_use == "hybrid":
                 set_status("Solving via Fast Hybrid (Qwen Vision + GPT-OSS 120B)...")
                 try:
                     full_text = call_groq_hybrid_pipeline(all_images if is_vision_mode else [], combined_text, instruction)
-                    def render_hybrid(txt=full_text):
-                        output.config(state=tk.NORMAL)
-                        output.insert("end-1c", txt)
-                        output.see(tk.END)
-                        output.config(state=tk.DISABLED)
-                    root.after(0, render_hybrid)
                 except Exception as h_err:
-                    print(f"[Hybrid failed: {h_err}] -> Fallback to direct Groq...")
-                    CURRENT_MODE = "gemini"
+                    print(f"[Hybrid error: {h_err}] -> Fallback to Gemini...")
+                    mode_to_use = "gemini"
 
-            if CURRENT_MODE == "gemini":
+            if mode_to_use == "gemini":
                 set_status("Solving via Gemini 3.8 Flash...")
                 gemini_prompt = f"{SYSTEM_PROMPT}\n\n{instruction}"
                 if combined_text and combined_text != "__VISION__":
                     gemini_prompt += f"\n\n<problem_text>\n{combined_text}\n</problem_text>"
                 try:
                     full_text = call_gemini_vision(all_images if is_vision_mode else [], gemini_prompt)
-                    def render_gemini(txt=full_text):
-                        output.config(state=tk.NORMAL)
-                        output.insert("end-1c", txt)
-                        output.see(tk.END)
-                        output.config(state=tk.DISABLED)
-                    root.after(0, render_gemini)
                 except Exception as g_err:
-                    print(f"[Gemini failed: {g_err}] -> Emergency Groq fallback...")
+                    print(f"[Gemini error: {g_err}] -> Emergency Groq fallback...")
                     full_text = call_groq_hybrid_pipeline(all_images if is_vision_mode else [], combined_text, instruction)
-                    def render_emer(txt=full_text):
-                        output.config(state=tk.NORMAL)
-                        output.insert("end-1c", txt)
-                        output.see(tk.END)
-                        output.config(state=tk.DISABLED)
-                    root.after(0, render_emer)
+
+            def render_ans(txt=full_text):
+                output.config(state=tk.NORMAL)
+                output.insert("end-1c", txt)
+                output.see(tk.END)
+                output.config(state=tk.DISABLED)
+            root.after(0, render_ans)
 
             def finish():
                 t_solve = round(time.time() - t0, 2)
