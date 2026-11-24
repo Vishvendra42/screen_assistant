@@ -1189,7 +1189,7 @@ def solve_problem(problem_text, source_name):
     output.mark_set("resp_start", "end-1c")
     output.mark_gravity("resp_start", tk.LEFT)
 
-    set_status(f"Solving via {GROQ_MODEL}â€¦")
+    set_status(f"Solving via {GROQ_MODEL}...")
 
     def worker():
         global CURRENT_MODE
