@@ -857,7 +857,15 @@ def show_window(target_alpha=None):
         target_alpha = TARGET_ALPHA
     root.deiconify()
     set_alpha(target_alpha)
+    root.attributes("-topmost", True)
     root.lift()
+    try:
+        hwnd = get_overlay_hwnd()
+        if hwnd:
+            user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+            user32.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
     root.after(60, prompt_entry.focus_force)
 
 
@@ -1489,111 +1497,110 @@ _blocked_keys = set()
 
 def _low_level_keyboard_proc(nCode, wParam, lParam):
     global _slash_down, _slash_count, _slash_time, _slash_released_time, _swallow_slash_up, _blocked_keys
-    if nCode >= 0:
-        kbd = KBDLLHOOKSTRUCT.from_address(lParam)
-        # Ignore simulated keys (e.g. Backspace cleanup)
-        if kbd.flags & 0x10:  # LLKHF_INJECTED
-            return user32.CallNextHookEx(None, nCode, wParam, lParam)
-
-        vk = kbd.vkCode
-        is_down = (wParam in (0x0100, 0x0104))  # WM_KEYDOWN, WM_SYSKEYDOWN
-        is_up = (wParam in (0x0101, 0x0105))    # WM_KEYUP, WM_SYSKEYUP
-
-        # If Ctrl, Alt, or Win is pressed, pass through immediately and cancel chord state.
-        is_modifier_active = (
-            (user32.GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 or
-            (user32.GetAsyncKeyState(VK_MENU) & 0x8000) != 0 or
-            (user32.GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 or
-            (user32.GetAsyncKeyState(VK_RWIN) & 0x8000) != 0
-        )
-        if is_modifier_active:
-            _slash_down = False
-            _slash_count = 0
-            _slash_released_time = 0.0
-            _swallow_slash_up = False
-            return user32.CallNextHookEx(None, nCode, wParam, lParam)
-
-        # ── 1. Function Keys (F9, F10, F11, F12) ─────────────────────────
-        # Handled directly at the low-level hook so F12 works 100% reliably
-        # even when Windows OS / debuggers block RegisterHotKey.
-        if is_down:
-            fn_action = None
-            if vk == VK_F9:       # F9 -> Solve screen
-                fn_action = "screen"
-            elif vk == VK_F10:    # F10 -> Show / hide overlay
-                fn_action = "toggle"
-            elif vk == VK_F11:    # F11 -> Append next page
-                fn_action = "append"
-            elif vk == VK_F12:    # F12 -> Switch AI mode
-                fn_action = "mode"
-
-            if fn_action:
-                _blocked_keys.add(vk)
-                fg = user32.GetForegroundWindow()
-                hotkey_queue.put((fn_action, fg))
-                return 1  # Block function key from reaching target app / browser
-
-        # ── 2. Slash Chords (/ + S, / + Z, / + D, / + C, / + M, / + T, / + Q, / + 1) ──
-        if vk in (VK_SLASH, VK_DIVIDE):
-            if is_down:
-                _slash_down = True
-                _slash_count += 1
-                _slash_time = time.time()
-                _slash_released_time = 0.0
-            elif is_up:
-                _slash_down = False
-                _slash_released_time = time.time()
-                if _swallow_slash_up:
-                    _swallow_slash_up = False
-                    return 1  # Swallow slash keyup after chord triggered
-
-        elif is_down:
-            now = time.time()
-            # Active chord: slash is currently physically held down OR was released within last 0.7s
-            is_active_chord = _slash_down or (0 < (now - _slash_released_time) <= 0.7)
-
-            # Snapshot slash count and immediately reset chord state so subsequent normal keys NEVER trigger!
-            chord_slash_count = _slash_count
-            _slash_down = False
-            _slash_released_time = 0.0
-            _slash_count = 0
-
-            if not is_active_chord:
+    try:
+        if nCode >= 0:
+            kbd = KBDLLHOOKSTRUCT.from_address(lParam)
+            # Ignore simulated keys (e.g. Backspace cleanup)
+            if kbd.flags & 0x10:  # LLKHF_INJECTED
                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-            chord_action = None
-            if vk == 0x53:       # 'S' -> solve screen
-                chord_action = "screen"
-            elif vk == 0x5A:     # 'Z' -> toggle visibility
-                chord_action = "toggle"
-            elif vk == 0x44:     # 'D' -> append page
-                chord_action = "append"
-            elif vk == 0x43:     # 'C' -> clip
-                chord_action = "clip"
-            elif vk == 0x4D:     # 'M' -> toggle AI mode
-                chord_action = "mode"
-            elif vk == 0x54:     # 'T' -> auto type
-                chord_action = "autotype"
-            elif vk == 0x51:     # 'Q' -> quit
-                chord_action = "quit"
-            elif vk == 0x31:     # '1' -> show / bring to front
-                chord_action = "show"
+            vk = kbd.vkCode
+            is_down = (wParam in (0x0100, 0x0104))  # WM_KEYDOWN, WM_SYSKEYDOWN
+            is_up = (wParam in (0x0101, 0x0105))    # WM_KEYUP, WM_SYSKEYUP
 
-            if chord_action:
-                _blocked_keys.add(vk)
-                _swallow_slash_up = True
-                fg = user32.GetForegroundWindow()
-                # Clean up the '/' character(s) that were typed
-                for _ in range(max(1, chord_slash_count)):
-                    user32.keybd_event(0x08, 0, 0, 0)  # Backspace down
-                    user32.keybd_event(0x08, 0, 2, 0)  # Backspace up
-                hotkey_queue.put((chord_action, fg))
-                return 1  # Block the triggered key from typing
+            # If Ctrl, Alt, or Win is pressed, pass through immediately and cancel chord state.
+            is_modifier_active = (
+                (user32.GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 or
+                (user32.GetAsyncKeyState(VK_MENU) & 0x8000) != 0 or
+                (user32.GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 or
+                (user32.GetAsyncKeyState(VK_RWIN) & 0x8000) != 0
+            )
+            if is_modifier_active:
+                _slash_down = False
+                _slash_count = 0
+                _slash_released_time = 0.0
+                _swallow_slash_up = False
+                return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-        elif is_up:
-            if vk in _blocked_keys:
-                _blocked_keys.discard(vk)
-                return 1  # Block the keyup of blocked keys
+            # ── 1. Function Keys (F9, F10, F11, F12) ─────────────────────────
+            # Handled directly at the low-level hook so F12 works 100% reliably
+            # even when Windows OS / debuggers block RegisterHotKey.
+            if is_down:
+                fn_action = None
+                if vk == VK_F9:       # F9 -> Solve screen
+                    fn_action = "screen"
+                elif vk == VK_F10:    # F10 -> Show / hide overlay
+                    fn_action = "toggle"
+                elif vk == VK_F11:    # F11 -> Append next page
+                    fn_action = "append"
+                elif vk == VK_F12:    # F12 -> Switch AI mode
+                    fn_action = "mode"
+
+                if fn_action:
+                    _blocked_keys.add(vk)
+                    fg = user32.GetForegroundWindow()
+                    hotkey_queue.put((fn_action, fg, 0))
+                    return 1  # Block function key from reaching target app / browser
+
+            # ── 2. Slash Chords (/ + S, / + Z, / + D, / + C, / + M, / + T, / + Q, / + 1) ──
+            if vk in (VK_SLASH, VK_DIVIDE):
+                if is_down:
+                    _slash_down = True
+                    _slash_count += 1
+                    _slash_time = time.time()
+                    _slash_released_time = 0.0
+                elif is_up:
+                    _slash_down = False
+                    _slash_released_time = time.time()
+                    if _swallow_slash_up:
+                        _swallow_slash_up = False
+                        return 1  # Swallow slash keyup after chord triggered
+
+            elif is_down:
+                now = time.time()
+                # Active chord: slash is currently physically held down OR was released within last 1.2s
+                is_active_chord = _slash_down or (0 < (now - _slash_released_time) <= 1.2)
+
+                # Snapshot slash count and immediately reset chord state so subsequent normal keys NEVER trigger!
+                chord_slash_count = _slash_count
+                _slash_down = False
+                _slash_released_time = 0.0
+                _slash_count = 0
+
+                if not is_active_chord:
+                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+                chord_action = None
+                if vk == 0x53:       # 'S' -> solve screen
+                    chord_action = "screen"
+                elif vk == 0x5A:     # 'Z' -> toggle visibility
+                    chord_action = "toggle"
+                elif vk == 0x44:     # 'D' -> append page
+                    chord_action = "append"
+                elif vk == 0x43:     # 'C' -> clip
+                    chord_action = "clip"
+                elif vk == 0x4D:     # 'M' -> toggle AI mode
+                    chord_action = "mode"
+                elif vk == 0x54:     # 'T' -> auto type
+                    chord_action = "autotype"
+                elif vk == 0x51:     # 'Q' -> quit
+                    chord_action = "quit"
+                elif vk in (0x31, 0x61):  # '1' (top row or numpad) -> show / bring to front
+                    chord_action = "show"
+
+                if chord_action:
+                    _blocked_keys.add(vk)
+                    _swallow_slash_up = True
+                    fg = user32.GetForegroundWindow()
+                    hotkey_queue.put((chord_action, fg, max(1, chord_slash_count)))
+                    return 1  # Block the triggered key from typing
+
+            elif is_up:
+                if vk in _blocked_keys:
+                    _blocked_keys.discard(vk)
+                    return 1  # Block the keyup of blocked keys
+    except Exception:
+        pass
 
     return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
@@ -1601,11 +1608,27 @@ def _low_level_keyboard_proc(nCode, wParam, lParam):
 _c_hook = HOOKPROC(_low_level_keyboard_proc)
 
 
+def _erase_slash_chars(count):
+    for _ in range(count):
+        user32.keybd_event(0x08, 0, 0, 0)  # Backspace down
+        user32.keybd_event(0x08, 0, 2, 0)  # Backspace up
+
+
 def poll_hotkey_queue():
     try:
         while True:
             item = hotkey_queue.get_nowait()
-            action, fg = item if isinstance(item, tuple) else (item, 0)
+            if isinstance(item, tuple) and len(item) == 3:
+                action, fg, slash_cnt = item
+            elif isinstance(item, tuple) and len(item) == 2:
+                action, fg = item
+                slash_cnt = 0
+            else:
+                action, fg, slash_cnt = item, 0, 0
+
+            if slash_cnt > 0:
+                _erase_slash_chars(slash_cnt)
+
             if action == "screen":
                 handle_screen_shortcut(fg)
             elif action == "toggle":
@@ -1639,9 +1662,12 @@ def hotkey_thread():
     user32.UnhookWindowsHookEx.restype = wintypes.BOOL
     user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
 
-    # 1. Install low-level keyboard hook for / + S / D / Z / C / Q / 1
+    # 1. Install low-level keyboard hook for / + S / D / Z / C / M / T / Q / 1
     _hhook = user32.SetWindowsHookExW(13, _c_hook, None, 0)
     atexit.register(lambda: user32.UnhookWindowsHookEx(_hhook) if _hhook else None)
+
+    # Refresh hook every 60s when idle so Windows sleep/resume never leaves a dead hook
+    user32.SetTimer(None, 1, 60000, None)
 
     # 2. Also register safe single keys (no Ctrl, no Alt, no F1-F4, F7, F8) as alternative
     ok_s = user32.RegisterHotKey(None, HK_SCREEN, MOD_NOREPEAT, VK_F9)
@@ -1653,7 +1679,14 @@ def hotkey_thread():
 
     msg = wintypes.MSG()
     while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-        if msg.message == WM_HOTKEY:
+        if msg.message == 0x0113:  # WM_TIMER -> keep hook alive after sleep/wake
+            if not _slash_down and not _blocked_keys:
+                new_hook = user32.SetWindowsHookExW(13, _c_hook, None, 0)
+                if new_hook:
+                    if _hhook:
+                        user32.UnhookWindowsHookEx(_hhook)
+                    _hhook = new_hook
+        elif msg.message == WM_HOTKEY:
             fg = user32.GetForegroundWindow()
             if msg.wParam == HK_TOGGLE:
                 hotkey_queue.put(("toggle", fg))
