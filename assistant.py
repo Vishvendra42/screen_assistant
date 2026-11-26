@@ -1091,12 +1091,33 @@ user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int
 user32.SendInput.restype = wintypes.UINT
 
 
-def _send_vk_press(vk):
-    inp_down = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=vk, wScan=0, dwFlags=0, time=0, dwExtraInfo=0)))
-    inp_up = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=vk, wScan=0, dwFlags=2, time=0, dwExtraInfo=0)))
+def _send_vk_press(vk, extended=False):
+    ext = 0x0001 if extended else 0
+    inp_down = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=vk, wScan=0, dwFlags=ext, time=0, dwExtraInfo=0)))
+    inp_up = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=vk, wScan=0, dwFlags=0x0002 | ext, time=0, dwExtraInfo=0)))
     user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(_INPUT))
-    time.sleep(random.uniform(0.012, 0.028))
+    time.sleep(random.uniform(0.012, 0.026))
     user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(_INPUT))
+
+
+def _reset_line_to_col0():
+    """Clear any auto-indentation added by code editors after Enter without touching text to the right."""
+    shift_down = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=0x10, wScan=0, dwFlags=0, time=0, dwExtraInfo=0)))
+    home_down = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=0x24, wScan=0, dwFlags=0x0001, time=0, dwExtraInfo=0)))
+    home_up = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=0x24, wScan=0, dwFlags=0x0003, time=0, dwExtraInfo=0)))
+    shift_up = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=0x10, wScan=0, dwFlags=0x0002, time=0, dwExtraInfo=0)))
+    user32.SendInput(1, ctypes.byref(shift_down), ctypes.sizeof(_INPUT))
+    time.sleep(0.008)
+    user32.SendInput(1, ctypes.byref(home_down), ctypes.sizeof(_INPUT))
+    time.sleep(0.008)
+    user32.SendInput(1, ctypes.byref(home_up), ctypes.sizeof(_INPUT))
+    time.sleep(0.008)
+    user32.SendInput(1, ctypes.byref(shift_up), ctypes.sizeof(_INPUT))
+    time.sleep(0.012)
+    # Replace selected auto-indent (if any) with a single space, then delete that space so Enter is never deleted
+    _send_unicode_char(" ")
+    time.sleep(0.012)
+    _send_vk_press(0x08)  # VK_BACK
 
 
 def _send_unicode_char(ch):
@@ -1182,10 +1203,16 @@ def auto_type_action(fg_hwnd=0):
                         break
                     if ch == "\n":
                         _send_vk_press(0x0D)  # VK_RETURN
+                        time.sleep(0.025)
+                        _reset_line_to_col0()
                     elif ch == "\t":
                         _send_vk_press(0x09)  # VK_TAB
                     else:
                         _send_unicode_char(ch)
+                        # Code editors auto-insert '}' right after '{'; remove it before '\n' pushes it down
+                        if ch == "{" and idx + 1 < total and text_to_type[idx + 1] == "\n":
+                            time.sleep(0.020)
+                            _send_vk_press(0x2E, extended=True)  # VK_DELETE
                     delay = _human_typing_delay(ch, prev_ch)
                     prev_ch = ch
                     if idx < total - 1:
