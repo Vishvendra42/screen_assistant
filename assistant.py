@@ -20,6 +20,7 @@ import json
 import queue
 import atexit
 import ctypes
+import random
 import warnings
 from ctypes import wintypes
 from pathlib import Path
@@ -376,12 +377,15 @@ state = {
     "front_app":        "",
     "front_hwnd":       0,
     "busy":             False,
+    "typing":           False,
     "last_code":        "",
+    "last_answer":      "",
     "pending_pages":    [],   # accumulated text pages
-        "pending_images":   [],   # accumulated base64 screenshot images for multi-page vision
+    "pending_images":   [],   # accumulated base64 screenshot images for multi-page vision
     "last_capture_img": "",
     "last_ocr_text":    "",
 }
+_typing_stop_event = threading.Event()
 
 
 def remember_front_app():
@@ -996,6 +1000,7 @@ def clear_chat():
     output.delete("1.0", tk.END)
     output.config(state=tk.DISABLED)
     state["last_code"] = ""
+    state["last_answer"] = ""
     state["pending_pages"] = []
     state["pending_images"] = []   # also discard queued vision images
     set_status("")
@@ -1053,12 +1058,152 @@ make_action_btn("Append  (F11 / /+D)", lambda: append_page_action(), "#ff9f0a")
 make_action_btn("Clip  (/+C)", lambda: solve_clip_action(), SUCCESS)
 
 
-def auto_type_action():
-    set_status("Auto Type: ready (placeholder)")
-    root.after(2000, lambda: set_status(""))
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
 
 
-auto_type_btn = make_action_btn("Auto Type", lambda: auto_type_action(), "#bf5af2")
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class _INPUT_UNION(ctypes.Union):
+    _fields_ = [("mi", _MOUSEINPUT), ("ki", _KEYBDINPUT)]
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = [("type", wintypes.DWORD), ("union", _INPUT_UNION)]
+
+
+user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int]
+user32.SendInput.restype = wintypes.UINT
+
+
+def _send_vk_press(vk):
+    inp_down = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=vk, wScan=0, dwFlags=0, time=0, dwExtraInfo=0)))
+    inp_up = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=vk, wScan=0, dwFlags=2, time=0, dwExtraInfo=0)))
+    user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(_INPUT))
+    time.sleep(random.uniform(0.012, 0.028))
+    user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(_INPUT))
+
+
+def _send_unicode_char(ch):
+    code = ord(ch)
+    if code <= 0xFFFF:
+        units = [code]
+    else:
+        # Encode non-BMP characters as UTF-16 surrogate pair
+        raw = ch.encode("utf-16-le")
+        units = [int.from_bytes(raw[i:i + 2], "little") for i in range(0, len(raw), 2)]
+
+    for u in units:
+        inp_down = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=0, wScan=u, dwFlags=0x0004, time=0, dwExtraInfo=0)))
+        user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(_INPUT))
+    time.sleep(random.uniform(0.010, 0.028))
+    for u in units:
+        inp_up = _INPUT(type=1, union=_INPUT_UNION(ki=_KEYBDINPUT(wVk=0, wScan=u, dwFlags=0x0006, time=0, dwExtraInfo=0)))
+        user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(_INPUT))
+
+
+def _human_typing_delay(ch, prev_ch):
+    if ch == "\n":
+        return random.uniform(0.14, 0.28)
+    if ch in (" ", "\t"):
+        d = random.uniform(0.055, 0.115)
+    elif ch in "{}()[]<>:;+-*/=&|!@#$%^~?,.\"'\\":
+        d = random.uniform(0.075, 0.145)
+    elif ch.isupper() or ch.isdigit():
+        d = random.uniform(0.065, 0.125)
+    elif prev_ch and prev_ch.islower() and ch.islower():
+        # Fluid burst on consecutive lowercase letters
+        d = random.uniform(0.036, 0.082)
+    else:
+        d = random.uniform(0.048, 0.098)
+
+    # Occasional subtle human thinking pause after word/statement boundaries
+    if prev_ch in (" ", ";", "{", "}", "\n") and random.random() < 0.04:
+        d += random.uniform(0.14, 0.30)
+    return d
+
+
+def auto_type_action(fg_hwnd=0):
+    if state["typing"]:
+        _typing_stop_event.set()
+        set_status("Stopping Auto Type...")
+        return
+
+    text_to_type = (state.get("last_code") or state.get("last_answer") or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text_to_type.strip():
+        set_status("No generated answer to type yet")
+        root.after(2000, lambda: set_status(""))
+        return
+
+    own_hwnd = get_overlay_hwnd()
+    target_hwnd = fg_hwnd if (fg_hwnd and fg_hwnd != own_hwnd and user32.IsWindow(fg_hwnd)) else state.get("front_hwnd", 0)
+
+    state["typing"] = True
+    _typing_stop_event.clear()
+    auto_type_btn.config(text="Stop Type  (/+T)", fg="#ff453a")
+
+    def type_worker():
+        try:
+            # Focus target writing panel if triggered from overlay button
+            if target_hwnd and target_hwnd != own_hwnd and user32.IsWindow(target_hwnd):
+                if user32.GetForegroundWindow() != target_hwnd:
+                    user32.SetForegroundWindow(target_hwnd)
+                    time.sleep(0.35)
+                else:
+                    time.sleep(0.22)
+            else:
+                root.after(0, lambda: set_status("Place cursor in editor... typing in 1.5s"))
+                for _ in range(15):
+                    if _typing_stop_event.is_set():
+                        break
+                    time.sleep(0.1)
+
+            if not _typing_stop_event.is_set():
+                total = len(text_to_type)
+                root.after(0, lambda: set_status(f"Auto Typing ({total} chars)... Esc or /+T to stop"))
+                prev_ch = ""
+                for idx, ch in enumerate(text_to_type):
+                    if _typing_stop_event.is_set():
+                        break
+                    if ch == "\n":
+                        _send_vk_press(0x0D)  # VK_RETURN
+                    elif ch == "\t":
+                        _send_vk_press(0x09)  # VK_TAB
+                    else:
+                        _send_unicode_char(ch)
+                    delay = _human_typing_delay(ch, prev_ch)
+                    prev_ch = ch
+                    if idx < total - 1:
+                        time.sleep(delay)
+        finally:
+            aborted = _typing_stop_event.is_set()
+            def done_ui():
+                state["typing"] = False
+                _typing_stop_event.clear()
+                auto_type_btn.config(text="Auto Type  (/+T)", fg="#bf5af2")
+                set_status("Auto Type stopped" if aborted else "Auto Type complete")
+                root.after(2200, lambda: set_status(""))
+            root.after(0, done_ui)
+
+    threading.Thread(target=type_worker, daemon=True).start()
+
+
+auto_type_btn = make_action_btn("Auto Type  (/+T)", lambda: auto_type_action(), "#bf5af2")
 
 
 def toggle_ai_mode():
@@ -1325,8 +1470,8 @@ def solve_problem(problem_text, source_name):
                 output.delete("resp_start", tk.END)
                 output.config(state=tk.DISABLED)
                 codes = render_response(full_text)
-                if codes:
-                    state["last_code"] = codes[-1]
+                state["last_answer"] = full_text.strip()
+                state["last_code"] = codes[-1] if codes else ""
                 write(f"\nDone - {source_name} ({t_solve}s)\n", "meta")
                 write(f"Inputs saved: captures/{session_file.name}\n", "meta")
                 state["busy"] = False
@@ -1522,6 +1667,12 @@ def _low_level_keyboard_proc(nCode, wParam, lParam):
                 _swallow_slash_up = False
                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
+            # ── 0. Emergency Esc stop during Auto Type ───────────────────────
+            if is_down and vk == 0x1B and state.get("typing"):
+                _typing_stop_event.set()
+                _blocked_keys.add(vk)
+                return 1
+
             # ── 1. Function Keys (F9, F10, F11, F12) ─────────────────────────
             # Handled directly at the low-level hook so F12 works 100% reliably
             # even when Windows OS / debuggers block RegisterHotKey.
@@ -1645,7 +1796,7 @@ def poll_hotkey_queue():
             elif action == "mode":
                 toggle_ai_mode()
             elif action == "autotype":
-                auto_type_action()
+                auto_type_action(fg)
     except queue.Empty:
         pass
     root.after(50, poll_hotkey_queue)
